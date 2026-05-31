@@ -1,0 +1,6 @@
+{
+  "name": "Rana AI Creator Studio",
+  "description": "A powerful, completely free AI-powered toolkit for YouTube creators to generate titles, scripts, hook text, shorts ideas, hashtags, descriptions, replies, and discover trending news faster.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -170,11 +170,12 @@ app.post("/api/generate", async (req, res): Promise<any> => {
 
     if (!process.env.GEMINI_API_KEY) {
       return res.status(500).json({
-        error: "GEMINI_API_KEY is not defined in the workspace env. Please verify in Settings > Secrets."
+        error: "GEMINI_API_KEY is not defined in the workspace env. Please verify in Secrets."
       });
     }
 
-    const ai = getGeminiClient();
+    const apiKey = process.env.GEMINI_API_KEY;
+    const isOpenRouter = apiKey.startsWith("sk-or-");
 
     let userPrompt = "";
     let systemInstruction = `You are the core intelligence of "Rana AI Creator Studio", an advanced AI assistant built for YouTube growth hacking and video creation. Your main goal is to generate extremely high CTR and high-retention YouTube metadata/scripts. You are friendly, creative, and optimized for success. `;
@@ -275,23 +276,70 @@ Provide actionable trend angles and explanation of why people love this idea. De
         break;
     }
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: userPrompt,
-      config: {
-        systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: schemas[tool],
-        temperature: 0.8,
-      }
-    });
+    let parsedJson;
 
-    const textOutput = response.text;
-    if (!textOutput) {
-      throw new Error("Failed to retrieve text content from Gemini's response.");
+    if (isOpenRouter) {
+      const schemaStr = JSON.stringify(schemas[tool]);
+      const fullSystemInstruction = `${systemInstruction}\nYou MUST return a JSON object/array strictly complying with this JSON Schema:
+${schemaStr}
+
+Return ONLY the raw JSON content. Do NOT wrap your response in markdown code blocks. Your output must be directly parseable as JSON.`;
+
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": process.env.APP_URL || "https://ais-dev-qixlidhiyqlyadedfwsems.us-east1.run.app",
+          "X-Title": "Rana AI Creator Studio"
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages: [
+            { role: "system", content: fullSystemInstruction },
+            { role: "user", content: userPrompt }
+          ],
+          temperature: 0.8,
+          response_format: { type: "json_object" }
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenRouter API failed (${response.status}): ${errorText}`);
+      }
+
+      const data: any = await response.json();
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) {
+        throw new Error("No response content from OpenRouter.");
+      }
+
+      let cleaned = content.trim();
+      if (cleaned.startsWith("```")) {
+        cleaned = cleaned.replace(/^```json?\s*/i, "").replace(/\s*```$/, "");
+      }
+      parsedJson = JSON.parse(cleaned);
+    } else {
+      const ai = getGeminiClient();
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: userPrompt,
+        config: {
+          systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: schemas[tool],
+          temperature: 0.8,
+        }
+      });
+
+      const textOutput = response.text;
+      if (!textOutput) {
+        throw new Error("Failed to retrieve text content from Gemini's response.");
+      }
+      parsedJson = JSON.parse(textOutput.trim());
     }
 
-    const parsedJson = JSON.parse(textOutput.trim());
     return res.json({ success: true, result: parsedJson });
 
   } catch (error: any) {
